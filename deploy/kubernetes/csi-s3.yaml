@@ -13,8 +13,8 @@ rules:
     resources: ["secrets"]
     verbs: ["get", "list"]
   - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "list", "update"]
+    resources: ["nodes", "nodes/status"]
+    verbs: ["get", "list", "watch", "update"]
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list"]
@@ -23,7 +23,7 @@ rules:
     verbs: ["get", "list", "watch", "update"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["volumeattachments"]
-    verbs: ["get", "list", "watch", "update"]
+    verbs: ["get", "list", "watch", "update", "patch"]
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -86,7 +86,7 @@ spec:
           args:
             - "--endpoint=$(CSI_ENDPOINT)"
             - "--nodeid=$(NODE_ID)"
-            - "--v=4"
+            - "--v=5"
           env:
             - name: CSI_ENDPOINT
               value: unix:///csi/csi.sock
