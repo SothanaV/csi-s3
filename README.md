@@ -21,16 +21,21 @@ apiVersion: v1
 kind: Secret
 metadata:
   namespace: kube-system
-  name: csi-s3-secret
   # Namespace depends on the configuration in the storageclass.yaml
-  namespace: kube-system
+  name: csi-s3-secret
 stringData:
   accessKeyID: <YOUR_ACCESS_KEY_ID>
   secretAccessKey: <YOUR_SECRET_ACCES_KEY>
-  # For AWS set it to "https://s3.<region>.amazonaws.com"
+  # For AWS set it to "https://s3.<region>.amazonaws.com", GoogleBucket set to "https://storage.googleapis.com"
   endpoint: <S3_ENDPOINT_URL>
   # If not on S3, set it to ""
   region: <S3_REGION>
+```
+
+apply secret
+```bash
+cd deploy/kebernetes
+kubectl create -f secret.yaml
 ```
 
 The region can be empty if you are using some other S3 compatible storage.
@@ -45,6 +50,18 @@ kubectl create -f csi-s3.yaml
 ```
 
 ### 3. Create the storage class
+
+- edit bucket name
+```yaml
+kind: StorageClass
+...
+parameters:
+  # to use an existing bucket, specify it here:
+  bucket: some-existing-bucket
+  ...
+```
+
+- apply
 
 ```bash
 kubectl create -f examples/storageclass.yaml
