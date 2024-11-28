@@ -207,6 +207,17 @@ kubectl logs -l app=csi-provisioner-s3 -c csi-s3
 kubectl logs -l app=csi-s3 -c csi-s3
 ```
 
+### Issues Attacher access denind
+
+log like
+```
+I1127 12:05:38.226712       1 utils.go:97] GRPC call: /csi.v1.Node/NodeStageVolume
+I1127 12:05:38.226726       1 utils.go:98] GRPC request: {"secrets":"***stripped***",...}
+E1127 12:05:38.830421       1 utils.go:101] GRPC error: Access Denied.
+```
+
+check permission at Object Storage
+
 ## Development
 
 This project can be built like any other go application.
