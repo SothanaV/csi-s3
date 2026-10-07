@@ -169,6 +169,25 @@ parameters:
 
 The prefix may contain multiple segments (e.g. `team/data/volumes`). Note that with `usePrefix: "true"` the S3 credentials then also need access to `HEAD`/`LIST` on that exact prefix — backends that scope credentials per prefix (object-lock style ACLs) may reject s3fs, which validates the bucket itself at mount time; rclone works with such credentials.
 
+#### Bucket with per-volume prefixes under a common root
+
+If `bucket` and `prefix` are set **without** `usePrefix`, each volume gets its own folder `<prefix>/<volume-id>` underneath the prefix, instead of at the root of the bucket:
+
+```yaml
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: csi-s3
+provisioner: ch.ctrox.csi.s3-driver
+parameters:
+  mounter: rclone
+  bucket: some-existing-bucket-name
+  # volumes live under <prefix>/<volume-id>/csi-fs, one per volume
+  prefix: team/data/volumes
+```
+
+Every volume keeps its own metadata and capacity, and deleting a volume only removes its own folder. Without `prefix` the per-volume folders are created at the root of the bucket (default behavior). If the bucket does not exist yet it is created, which requires the credentials to allow it.
+
 ### TLS certificate verification (skipSSLVerify)
 
 By default the server certificate of an `https` endpoint is always verified. If your storage uses a self-signed certificate or a private CA and you cannot install the CA certificate, certificate verification can be disabled with `skipSSLVerify` in the secret:
