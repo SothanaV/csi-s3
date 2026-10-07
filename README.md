@@ -2,9 +2,32 @@
 
 This is a Container Storage Interface ([CSI](https://github.com/container-storage-interface/spec/blob/master/spec.md)) for S3 (or S3 compatible) storage. This can dynamically allocate buckets and mount them via a fuse mount into any container.
 
+This fork adds:
+
+* `skipSSLVerify` secret option to disable TLS certificate verification (self-signed / private CA endpoints), applied to the S3 API client and to all four mounters
+* Multi-segment bucket prefixes (e.g. `team/data/vol-1`) work correctly with `usePrefix: "true"`
+* rclone uses path-style addressing (`--s3-provider=Other`) for endpoints without a region, instead of AWS virtual-host addressing which does not resolve for S3 compatible endpoints
+* Images buildable again: the buster base images now use `archive.debian.org`, dependencies resolve from `go.sum` instead of `go get`
+
 ## Status
 
 This is still very experimental and should not be used in any production environment. Unexpected data loss could occur depending on what mounter and S3 storage backend is being used.
+
+## Images
+
+Prebuilt images for this fork are pushed to Docker Hub:
+
+```
+sothanav/csi-s3:v1.2.0-rc.2-skipssl3        # rclone, s3fs, goofys
+sothanav/csi-s3:v1.2.0-rc.2-skipssl3-full   # additional s3backer
+```
+
+To build your own:
+
+```bash
+make container VERSION=<tag> REGISTRY_NAME=<registry>
+# s3backer variant is built as <tag>-full as well
+```
 
 ## Kubernetes installation
 
@@ -39,6 +62,8 @@ kubectl create -f secret.yaml
 ```
 
 The region can be empty if you are using some other S3 compatible storage.
+
+For an HTTPS endpoint with an unverifiable certificate (self-signed or private CA), also add `skipSSLVerify: "true"` to the secret — see [TLS certificate verification](#tls-certificate-verification-skipsslverify).
 
 ### 2. Deploy the driver
 
@@ -142,6 +167,35 @@ parameters:
 ```
 **Note:** all volumes created with this `StorageClass` will always be mounted to the same bucket and path, meaning they will be identical.
 
+The prefix may contain multiple segments (e.g. `team/data/volumes`). Note that with `usePrefix: "true"` the S3 credentials then also need access to `HEAD`/`LIST` on that exact prefix — backends that scope credentials per prefix (object-lock style ACLs) may reject s3fs, which validates the bucket itself at mount time; rclone works with such credentials.
+
+### TLS certificate verification (skipSSLVerify)
+
+By default the server certificate of an `https` endpoint is always verified. If your storage uses a self-signed certificate or a private CA and you cannot install the CA certificate, certificate verification can be disabled with `skipSSLVerify` in the secret:
+
+```yaml
+stringData:
+  accessKeyID: <YOUR_ACCESS_KEY_ID>
+  secretAccessKey: <YOUR_SECRET_ACCES_KEY>
+  endpoint: https://s3.internal.example
+  region: ""
+  # accepts true/false (also "1"/"0"), empty means verify (default)
+  skipSSLVerify: "true"
+```
+
+This applies to the S3 API client (bucket create / metadata read / prefix delete) and to the filesystem mount, using the matching mechanism per mounter:
+
+| Mounter | Mechanism |
+| --- | --- |
+| rclone | `--no-check-certificate` |
+| s3fs | `-o no_check_certificate` |
+| s3backer | `--insecure` (only with `--ssl`) |
+| goofys | `InsecureSkipVerify` on the shared HTTP transport |
+
+Because the option is on the secret, it reaches the provisioner and every node publish/stage call. Changing the secret takes effect for new volumes and new mounts; pods that already have the volume mounted must be recreated to remount with the new setting.
+
+Mounting with an unverifiable certificate is a trade-off against MITM attacks; installing the CA into the cluster nodes or baking it into a custom image is always the better option.
+
 ### Mounter
 
 As S3 is not a real file system there are some limitations to consider here. Depending on what mounter you are using, you will have different levels of POSIX compability. Also depending on what S3 storage backend you are using there are not always [consistency guarantees](https://github.com/gaul/are-we-consistent-yet#observed-consistency).
@@ -217,6 +271,18 @@ E1127 12:05:38.830421       1 utils.go:101] GRPC error: Access Denied.
 ```
 
 check permission at Object Storage
+
+### TLS certificate errors (x509: certificate signed by unknown authority)
+
+Either install the CA certificate of the storage endpoint on the nodes / inside the driver image, or set `skipSSLVerify: "true"` in the secret (see [TLS certificate verification](#tls-certificate-verification-skipsslverify)). Note that s3fs needs version 1.80 or newer for the corresponding mount option.
+
+### `The specified key does not exist` when staging a volume of a prefixed bucket
+
+The driver stores volume metadata at `<prefix>/.metadata.json` and reads it at each stage/publish. With `usePrefix: "true"` the credentials need `GetObject` on exactly that key, and the volume ID must survive provisioning intact (`<bucket>/<prefix>`). Verify metadata exists with e.g. `rclone cat <remote>:<bucket>/<prefix>/.metadata.json`. In this fork this was also caused by `volumeIDToBucketPrefix` truncating multi-segment prefixes (`infrastructure/k8s-volumes-dev/csi-test` became `infrastructure`), fixed by `SplitN`.
+
+### `bucket not found` with s3fs on a prefix-scoped bucket
+
+s3fs sends a bucket level check at the beginning of the mount. If that call is not granted to the prefix and is answered with an S3 error, the mount aborts. Switch such storage classes to the `rclone` mounter, which only operates within the prefix.
 
 ## Development
 
