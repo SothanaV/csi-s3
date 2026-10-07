@@ -38,6 +38,52 @@ make container VERSION=<tag> REGISTRY_NAME=<registry>
 * Kubernetes has to allow privileged containers
 * Docker daemon must allow shared mounts (systemd flag `MountFlags=shared`)
 
+Two ways to install: the Helm chart in `_deploy/` (next section) or the raw
+manifests in `deploy/kubernetes/` (sections 1-4 below). They create the same
+objects with the same names, so pick one — adopting an existing
+manifest-based install into Helm is documented in
+[_deploy/README.md](_deploy/README.md#existing-kubectl-installation).
+
+### Install with Helm
+
+Storage classes must be described in a values file: `--set storageClasses[0].x=y`
+replaces the whole list entry and drops `name`/`enabled`.
+
+```yaml
+# my-values.yaml
+storageClasses:
+  - name: csi-s3
+    enabled: true
+    mounter: rclone
+    bucket: <S3-BUCKET-NAME>
+    prefix: infrastructure/k8s-volumes
+```
+
+```bash
+# 1. render and check
+helm template csi-s3 _deploy -n kube-system -f my-values.yaml
+
+# 2. install (create the credentials secret first, see step 1 below)
+helm upgrade --install csi-s3 _deploy -n kube-system -f my-values.yaml
+```
+
+Expected output: `Release "csi-s3" has been upgraded. Happy Helming!`
+
+Verify the node plugin and controllers, then test a volume with a PVC as in
+step 4 below:
+
+```bash
+kubectl -n kube-system get pods -l app=csi-s3
+kubectl get csidriver ch.ctrox.csi.s3-driver
+kubectl get sc
+```
+
+All values (sidecar images, storage classes, kubelet paths, an optional
+chart-managed secret) are in [_deploy/values.yaml](_deploy/values.yaml);
+the full parameter table and a private-endpoint example
+([_deploy/values/example.yaml](_deploy/values/example.yaml)) are in
+[_deploy/README.md](_deploy/README.md).
+
 ### 1. Create a secret with your S3 credentials
 
 ```yaml

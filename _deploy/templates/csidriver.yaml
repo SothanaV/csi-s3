@@ -1,0 +1,36 @@
+{{- if .Values.driver.csiDriverObject.create }}
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  # without this object kubelet never applies pod fsGroup to volumes of
+  # this driver; File makes it chown the mounted volume, which the block
+  # mounter (real XFS) needs for workloads running as non-root
+  name: {{ include "csi-s3.driverName" . }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app.kubernetes.io/component: driver
+spec:
+  {{- with .Values.driver.csiDriverObject.extraSpec }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+  {{- if hasKey .Values.driver.csiDriverObject "fsGroupPolicy" }}
+  {{- with .Values.driver.csiDriverObject.fsGroupPolicy }}
+  fsGroupPolicy: {{ . }}
+  {{- end }}
+  {{- end }}
+  {{- if hasKey .Values.driver.csiDriverObject "attachRequired" }}
+  {{- with .Values.driver.csiDriverObject.attachRequired }}
+  attachRequired: {{ . }}
+  {{- end }}
+  {{- end }}
+  {{- if hasKey .Values.driver.csiDriverObject "podInfoOnMount" }}
+  {{- with .Values.driver.csiDriverObject.podInfoOnMount }}
+  podInfoOnMount: {{ . }}
+  {{- end }}
+  {{- end }}
+  {{- if hasKey .Values.driver.csiDriverObject "storageCapacity" }}
+  {{- with .Values.driver.csiDriverObject.storageCapacity }}
+  storageCapacity: {{ . }}
+  {{- end }}
+  {{- end }}
+{{- end }}

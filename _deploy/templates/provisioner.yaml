@@ -1,0 +1,114 @@
+{{- if .Values.provisioner.enabled }}
+{{- $ns := include "csi-s3.namespace" . }}
+{{- $socket := include "csi-s3.pluginDir" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  # needed for the StatefulSet's stable identity; the port is a dummy,
+  # the CSI socket is a unix socket, not a TCP endpoint
+  name: {{ .Values.names.provisioner }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app: {{ .Values.names.provisioner }}
+    app.kubernetes.io/component: provisioner
+spec:
+  selector:
+    app: {{ .Values.names.provisioner }}
+  ports:
+    - name: csi-s3-dummy
+      port: 65535
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: {{ .Values.names.provisioner }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app: {{ .Values.names.provisioner }}
+    app.kubernetes.io/component: provisioner
+spec:
+  serviceName: {{ .Values.names.provisioner | quote }}
+  replicas: {{ .Values.provisioner.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.names.provisioner }}
+  template:
+    metadata:
+      labels:
+        {{- include "csi-s3.labels" . | nindent 8 }}
+        app: {{ .Values.names.provisioner }}
+        app.kubernetes.io/component: provisioner
+      {{- with .Values.provisioner.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccount: {{ include "csi-s3.serviceAccountName" (dict "root" . "component" "provisioner") }}
+      {{- with .Values.provisioner.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.provisioner.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.provisioner.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.provisioner.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.driver.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: csi-provisioner
+          image: {{ include "csi-s3.image" .Values.provisioner.image | quote }}
+          imagePullPolicy: {{ .Values.provisioner.image.pullPolicy }}
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--v={{ .Values.provisioner.logLevel }}"
+            {{- range .Values.provisioner.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: ADDRESS
+              value: {{ $socket }}/csi.sock
+          {{- with .Values.provisioner.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: {{ $socket }}
+        # the driver runs here too: external-provisioner talks to it over
+        # the shared emptyDir socket for CreateVolume/DeleteVolume
+        - name: {{ .Values.names.driver }}
+          image: {{ include "csi-s3.image" .Values.driver.image | quote }}
+          imagePullPolicy: {{ .Values.driver.image.pullPolicy }}
+          args:
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--nodeid=$(NODE_ID)"
+            - "--v={{ .Values.provisioner.logLevel }}"
+          env:
+            - name: CSI_ENDPOINT
+              value: unix://{{ $socket }}/csi.sock
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          {{- with .Values.provisioner.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: {{ $socket }}
+      volumes:
+        - name: socket-dir
+          emptyDir: {}
+{{- end }}

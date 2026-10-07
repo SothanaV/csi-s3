@@ -1,0 +1,46 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-csi-s3-test
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.tests.size }}
+  storageClassName: {{ .Values.tests.storageClassName }}
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Release.Name }}-csi-s3-test
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  restartPolicy: Never
+  containers:
+    - name: write
+      image: "{{ .Values.tests.image.repository }}:{{ .Values.tests.image.tag }}"
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          touch /data/helm-test-ok
+          ls -l /data
+          echo "csi-s3 volume mounted and writable"
+      volumeMounts:
+        - name: volume
+          mountPath: /data
+  volumes:
+    - name: volume
+      persistentVolumeClaim:
+        claimName: {{ .Release.Name }}-csi-s3-test
+{{- end }}

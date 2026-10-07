@@ -1,0 +1,90 @@
+{{- if .Values.attacher.enabled }}
+{{- $ns := include "csi-s3.namespace" . }}
+{{- $socket := include "csi-s3.pluginDir" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  # needed for the StatefulSet's stable identity; the port is a dummy,
+  # the CSI socket is a unix socket on the host, not a TCP endpoint
+  name: {{ .Values.names.attacher }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app: {{ .Values.names.attacher }}
+    app.kubernetes.io/component: attacher
+spec:
+  selector:
+    app: {{ .Values.names.attacher }}
+  ports:
+    - name: csi-s3-dummy
+      port: 65535
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: {{ .Values.names.attacher }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app: {{ .Values.names.attacher }}
+    app.kubernetes.io/component: attacher
+spec:
+  serviceName: {{ .Values.names.attacher | quote }}
+  replicas: {{ .Values.attacher.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Values.names.attacher }}
+  template:
+    metadata:
+      labels:
+        {{- include "csi-s3.labels" . | nindent 8 }}
+        app: {{ .Values.names.attacher }}
+        app.kubernetes.io/component: attacher
+      {{- with .Values.attacher.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccount: {{ include "csi-s3.serviceAccountName" (dict "root" . "component" "attacher") }}
+      {{- with .Values.attacher.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.attacher.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.attacher.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.attacher.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.driver.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: csi-attacher
+          image: {{ include "csi-s3.image" .Values.attacher.image | quote }}
+          imagePullPolicy: {{ .Values.attacher.image.pullPolicy }}
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--v={{ .Values.attacher.logLevel }}"
+          env:
+            - name: ADDRESS
+              value: {{ $socket }}/csi.sock
+          {{- with .Values.attacher.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: {{ $socket }}
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: {{ $socket }}
+            type: DirectoryOrCreate
+{{- end }}

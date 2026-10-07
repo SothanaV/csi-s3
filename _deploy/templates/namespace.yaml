@@ -1,0 +1,8 @@
+{{- if .Values.createNamespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "csi-s3.namespace" . }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+{{- end }}

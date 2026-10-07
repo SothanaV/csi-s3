@@ -1,0 +1,59 @@
+# Example: private S3 compatible endpoint with one shared bucket, both
+# storage classes, and a chart-managed credentials secret.
+#
+#   helm upgrade --install csi-s3 _deploy -f _deploy/values/example.yaml
+#
+# Never commit real keys: pass them with --set-string or an untracked
+# secrets file instead, e.g.
+#
+#   helm upgrade --install csi-s3 _deploy -f _deploy/values/example.yaml \
+#     -f ~/secrets/csi-s3.yaml
+#
+# Or keep the secret out of the release entirely: secret.create=false plus
+# a manually created csi-s3-secret (deploy/kubernetes/secret.yaml).
+
+namespace: kube-system
+
+driver:
+  image:
+    # s3backer needs a -full tag; the default tag already is one
+    repository: sothanav/csi-s3
+    tag: v1.2.0-rc.2-skipssl6
+    pullPolicy: IfNotPresent
+  nodeSelector:
+    kubernetes.io/os: linux
+  tolerations:
+    # the node plugin must run on control-plane nodes too, those are the
+    # ones the controller pods talk to over the host socket
+    - operator: Exists
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+
+secret:
+  create: true
+  accessKeyID: ""
+  secretAccessKey: ""
+  endpoint: "https://s3.internal.example.com:9000"
+  region: ""
+  skipSSLVerify: "true"
+
+storageClasses:
+  # plain FUSE file volumes
+  - name: csi-s3
+    enabled: true
+    mounter: rclone
+    bucket: some-existing-bucket
+    prefix: infrastructure/k8s-volumes
+
+  # block volumes (s3backer + XFS) for databases
+  - name: csi-s3-block
+    enabled: true
+    mounter: s3backer
+    bucket: some-existing-bucket
+    prefix: infrastructure/k8s-volumes
+
+tests:
+  enabled: true

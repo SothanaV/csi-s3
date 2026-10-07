@@ -1,0 +1,147 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Values.names.driver }}
+  namespace: {{ include "csi-s3.namespace" . }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app: {{ .Values.names.driver }}
+    app.kubernetes.io/component: driver
+spec:
+  {{- with .Values.driver.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Values.names.driver }}
+  template:
+    metadata:
+      labels:
+        {{- include "csi-s3.labels" . | nindent 8 }}
+        app: {{ .Values.names.driver }}
+        app.kubernetes.io/component: driver
+        {{- with .Values.driver.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.driver.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccount: {{ include "csi-s3.serviceAccountName" (dict "root" . "component" "driver") }}
+      {{- with .Values.driver.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.driver.terminationGracePeriodSeconds }}
+      {{- if .Values.driver.hostNetwork }}
+      hostNetwork: true
+      {{- end }}
+      {{- with (include "csi-s3.dnsPolicy" .) }}
+      dnsPolicy: {{ . }}
+      {{- end }}
+      {{- with .Values.driver.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.driver.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.driver.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.driver.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.driver.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: driver-registrar
+          image: {{ include "csi-s3.image" .Values.registrar.image | quote }}
+          imagePullPolicy: {{ .Values.registrar.image.pullPolicy }}
+          args:
+            - "--csi-address=$(ADDRESS)"
+            - "--kubelet-registration-path={{ include "csi-s3.pluginDir" . }}/csi.sock"
+            - "--v={{ .Values.registrar.logLevel }}"
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration/
+        - name: {{ .Values.names.driver }}
+          image: {{ include "csi-s3.image" .Values.driver.image | quote }}
+          imagePullPolicy: {{ .Values.driver.image.pullPolicy }}
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            capabilities:
+              add:
+                - SYS_ADMIN
+          args:
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--nodeid=$(NODE_ID)"
+            - "--v={{ .Values.driver.logLevel }}"
+          env:
+            - name: CSI_ENDPOINT
+              value: {{ include "csi-s3.endpoint" . }}
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            {{- with .Values.driver.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.driver.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.driver.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.driver.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: pods-mount-dir
+              mountPath: {{ include "csi-s3.kubeletDir" . }}/pods
+              mountPropagation: "Bidirectional"
+            - name: fuse-device
+              mountPath: /dev/fuse
+            {{- with .Values.driver.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: registration-dir
+          hostPath:
+            path: {{ include "csi-s3.kubeletDir" . }}/plugins_registry/
+            type: DirectoryOrCreate
+        - name: plugin-dir
+          hostPath:
+            path: {{ include "csi-s3.pluginDir" . }}
+            type: DirectoryOrCreate
+        - name: pods-mount-dir
+          hostPath:
+            path: {{ include "csi-s3.kubeletDir" . }}/pods
+            type: Directory
+        - name: fuse-device
+          hostPath:
+            path: /dev/fuse
+        {{- with .Values.driver.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

@@ -1,0 +1,133 @@
+{{- if .Values.rbac.create }}
+{{- $ns := include "csi-s3.namespace" . }}
+{{- $driverSA := include "csi-s3.serviceAccountName" (dict "root" . "component" "driver") }}
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ .Values.names.driver }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app.kubernetes.io/component: driver
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/status"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ .Values.names.driver }}
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app.kubernetes.io/component: driver
+subjects:
+  - kind: ServiceAccount
+    name: {{ $driverSA }}
+    namespace: {{ $ns }}
+roleRef:
+  kind: ClusterRole
+  name: {{ .Values.names.driver }}
+  apiGroup: rbac.authorization.k8s.io
+{{- if .Values.provisioner.enabled }}
+{{- $provisionerSA := include "csi-s3.serviceAccountName" (dict "root" . "component" "provisioner") }}
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: external-provisioner-runner
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app.kubernetes.io/component: provisioner
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-role
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app.kubernetes.io/component: provisioner
+subjects:
+  - kind: ServiceAccount
+    name: {{ $provisionerSA }}
+    namespace: {{ $ns }}
+roleRef:
+  kind: ClusterRole
+  name: external-provisioner-runner
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- if .Values.attacher.enabled }}
+{{- $attacherSA := include "csi-s3.serviceAccountName" (dict "root" . "component" "attacher") }}
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: external-attacher-runner
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app.kubernetes.io/component: attacher
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments/status"]
+    verbs: ["patch", "update"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-attacher-role
+  labels:
+    {{- include "csi-s3.labels" . | nindent 4 }}
+    app.kubernetes.io/component: attacher
+subjects:
+  - kind: ServiceAccount
+    name: {{ $attacherSA }}
+    namespace: {{ $ns }}
+roleRef:
+  kind: ClusterRole
+  name: external-attacher-runner
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{- end }}

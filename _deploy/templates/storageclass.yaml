@@ -1,0 +1,29 @@
+{{- $root := . -}}
+{{- range $i, $sc := .Values.storageClasses }}
+{{- /* enabled defaults to true, also when the entry came from --set */}}
+{{- $enabled := true }}
+{{- if hasKey $sc "enabled" }}
+{{- $enabled = $sc.enabled }}
+{{- end }}
+{{- if $enabled }}
+---
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  # describe classes in a values file: --set storageClasses[<i>].name=x
+  # replaces the whole list entry and drops the other fields
+  name: {{ required (printf "storageClasses[%d].name is required (a --set on a list index replaces the whole entry, use a values file)" $i) $sc.name }}
+  labels:
+    {{- include "csi-s3.labels" $root | nindent 4 }}
+  {{- with $sc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+provisioner: {{ include "csi-s3.driverName" $root }}
+reclaimPolicy: {{ default "Delete" $sc.reclaimPolicy }}
+volumeBindingMode: {{ default "Immediate" $sc.volumeBindingMode }}
+allowVolumeExpansion: {{ eq $sc.allowVolumeExpansion true }}
+parameters:
+  {{- include "csi-s3.storageClassParameters" (dict "root" $root "sc" $sc) | nindent 2 }}
+{{- end }}
+{{- end }}

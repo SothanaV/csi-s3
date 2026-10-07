@@ -1,0 +1,68 @@
+Thanks for installing {{ .Chart.Name }} (release {{ .Release.Name }}).
+
+CSI driver name: {{ include "csi-s3.driverName" . }}
+Namespace:       {{ include "csi-s3.namespace" . }}
+Driver image:    {{ include "csi-s3.image" .Values.driver.image }}
+
+Watch the pods come up:
+
+  kubectl -n {{ include "csi-s3.namespace" . }} get pods -l app={{ .Values.names.driver }} -w
+{{- if .Values.attacher.enabled }}
+  kubectl -n {{ include "csi-s3.namespace" . }} get pod {{ .Values.names.attacher }}-0 -w
+{{- end }}
+{{- if .Values.provisioner.enabled }}
+  kubectl -n {{ include "csi-s3.namespace" . }} get pod {{ .Values.names.provisioner }}-0 -w
+{{- end }}
+
+Verify the driver registered with kubelet:
+
+  kubectl get csidriver {{ include "csi-s3.driverName" . }}
+{{- if .Values.secret.create }}
+
+Credentials: secret {{ include "csi-s3.namespace" . }}/{{ include "csi-s3.secretName" . }} was rendered from
+values. Prefer replacing it with a secret managed outside git.
+{{- else }}
+
+Credentials: secret.create=false, so no secret was rendered. Before provisioning,
+make sure {{ include "csi-s3.namespace" . }}/{{ include "csi-s3.secretName" . }} exists:
+
+  kubectl -n {{ include "csi-s3.namespace" . }} create secret generic {{ include "csi-s3.secretName" . }} \
+    --from-literal=accessKeyID=... --from-literal=secretAccessKey=... \
+    --from-literal=endpoint=... --from-literal=region=
+{{- end }}
+{{- $enabled := list }}
+{{- range .Values.storageClasses }}
+{{- if .enabled }}
+{{- $enabled = append $enabled . }}
+{{- end }}
+{{- end }}
+{{- if $enabled }}
+
+Storage classes:
+{{ range $enabled }}  - {{ .name }} (mounter: {{ default "rclone" .mounter }}{{ if .bucket }}, bucket: {{ .bucket }}{{ else }}, one bucket per volume{{ end }})
+{{ end }}
+Test it with {{ (first $enabled).name }}:
+
+  kubectl apply -f - <<'EOF'
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: csi-s3-test
+  spec:
+    accessModes: [ReadWriteOnce]
+    resources:
+      requests:
+        storage: 1Gi
+    storageClassName: {{ (first $enabled).name }}
+  EOF
+  kubectl get pvc csi-s3-test
+{{- else }}
+
+No storage class was enabled: add one under storageClasses[] in values.yaml.
+{{- end }}
+{{- if .Values.tests.enabled }}
+
+Or run the chart's own test:
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- end }}

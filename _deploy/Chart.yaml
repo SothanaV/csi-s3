@@ -1,0 +1,23 @@
+apiVersion: v2
+name: csi-s3
+description: CSI driver for S3 (or S3 compatible) storage - mounts volumes via FUSE (rclone, s3fs, goofys, s3backer)
+
+type: application
+
+version: 1.0.0
+
+appVersion: "v1.2.0-rc.2-skipssl6"
+
+keywords:
+  - s3
+  - csi
+  - persistent-volume
+  - rclone
+  - s3backer
+
+home: https://github.com/SothanaV/csi-s3
+sources:
+  - https://github.com/SothanaV/csi-s3
+
+annotations:
+  category: Storage

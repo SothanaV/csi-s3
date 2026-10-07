@@ -1,0 +1,255 @@
+# =====================================================================
+# csi-s3 Helm chart values
+#
+# Defaults mirror deploy/kubernetes/*.yaml so that an existing
+# kubectl-created installation and a Helm installation produce the same
+# objects (same names, same namespace, same driver name).
+# CSI object names are load-bearing: kubelet plugin paths, the driver
+# name, and the secret name referenced from the storage classes must
+# agree with each other. Only change names together.
+# =====================================================================
+
+# ---------------------------------------------------------------------
+# Naming
+# ---------------------------------------------------------------------
+# Namespace everything runs in. The node DaemonSet writes into kubelet
+# paths on the host, so this is usually kube-system. It must match
+# storageClasses[].secretNamespace.
+namespace: kube-system
+
+# Create the namespace above if it does not exist (leave false for
+# kube-system).
+createNamespace: false
+
+names:
+  # DaemonSet / node driver, service account, ClusterRole names
+  driver: csi-s3
+  # controller StatefulSet that runs csi-provisioner + the driver
+  provisioner: csi-provisioner-s3
+  # controller StatefulSet that runs csi-attacher
+  attacher: csi-attacher-s3
+  # CSI driver name registered with kubelet (provisioner field in
+  # storage classes)
+  csiDriver: ch.ctrox.csi.s3-driver
+
+nameOverride: ""
+
+# ---------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------
+driver:
+  image:
+    registry: docker.io
+    repository: sothanav/csi-s3
+    # the -full variant contains rclone, s3fs, goofys and s3backer;
+    # the s3backer storage class needs a -full tag
+    tag: v1.2.0-rc.2-skipssl6
+    pullPolicy: Always
+  # pull secrets for private registries, applied to every pod in the chart
+  imagePullSecrets: []
+  # - name: my-registry-pull-secret
+
+  # klog verbosity for the driver container (-v=N)
+  logLevel: 5
+
+  # kubelet layout on the host. Change for k3s/microk8s installs with a
+  # non-default kubelet root only if the socket paths move with it.
+  kubeletDir: /var/lib/kubelet
+
+  # run the node DaemonSet on the host network
+  hostNetwork: true
+  # empty omits the field, so the API server defaults it to ClusterFirst,
+  # exactly like deploy/kubernetes/csi-s3.yaml. Use "ClusterFirstWithHostNet"
+  # if the driver has to resolve in-cluster service names, or "None" plus
+  # dnsConfig when cluster DNS is unreachable from the host network.
+  dnsPolicy: ""
+  dnsConfig: {}
+
+  # attachRequired / fsGroupPolicy for the CSIDriver object
+  csiDriverObject:
+    create: true
+    fsGroupPolicy: File
+    # omit fields that are null so the API server keeps its defaults
+    attachRequired: null
+    podInfoOnMount: null
+    storageCapacity: null
+    extraSpec: {}
+    # extraSpec:
+    #   volumeLifecycleModes:
+    #     - Persistent
+
+  # node selection for the DaemonSet
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  updateStrategy: {}
+  # updateStrategy:
+  #   type: RollingUpdate
+  #   rollingUpdate:
+  #     maxSurge: 0
+  #     maxUnavailable: 1
+
+  resources: {}
+  podAnnotations: {}
+  podLabels: {}
+  priorityClassName: ""
+  terminationGracePeriodSeconds: 30
+
+  # extra env vars appended to the driver container
+  extraEnv: []
+  # extraEnv:
+  #   - name: RCLONE_OPTS
+  #     value: "--transfers 8"
+
+  # extra volume mounts / volumes for the driver container
+  extraVolumeMounts: []
+  extraVolumes: []
+
+  # probes for the driver container (none upstream)
+  livenessProbe: {}
+  readinessProbe: {}
+
+# ---------------------------------------------------------------------
+# Sidecars (controller plane)
+# ---------------------------------------------------------------------
+attacher:
+  enabled: true
+  image:
+    registry: registry.k8s.io
+    repository: sig-storage/csi-attacher
+    tag: v3.4.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  logLevel: 4
+  nodeSelector: {}
+  # matches the upstream manifest: schedule onto control-plane nodes
+  tolerations:
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+  affinity: {}
+  resources: {}
+  podAnnotations: {}
+  priorityClassName: ""
+
+provisioner:
+  enabled: true
+  image:
+    registry: registry.k8s.io
+    repository: sig-storage/csi-provisioner
+    tag: v3.5.0
+    pullPolicy: IfNotPresent
+  replicas: 1
+  logLevel: 4
+  # extra args for csi-provisioner, e.g. --extra-create-metadata
+  extraArgs: []
+  nodeSelector: {}
+  tolerations:
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+  affinity: {}
+  resources: {}
+  podAnnotations: {}
+  priorityClassName: ""
+
+registrar:
+  image:
+    registry: registry.k8s.io
+    repository: sig-storage/csi-node-driver-registrar
+    tag: v2.8.0
+    pullPolicy: IfNotPresent
+  logLevel: 4
+
+# ---------------------------------------------------------------------
+# RBAC
+# ---------------------------------------------------------------------
+rbac:
+  create: true
+
+serviceAccounts:
+  driver:
+    create: true
+    name: ""
+    annotations: {}
+  provisioner:
+    create: true
+    name: ""
+    annotations: {}
+  attacher:
+    create: true
+    name: ""
+    annotations: {}
+
+# ---------------------------------------------------------------------
+# S3 credentials secret
+#
+# Leave create=false and manage the secret out of band (or from a
+# secrets manager). Never commit real keys to git.
+# ---------------------------------------------------------------------
+secret:
+  create: false
+  name: csi-s3-secret
+  annotations: {}
+  # used when create=true
+  accessKeyID: ""
+  secretAccessKey: ""
+  # For AWS use "https://s3.<region>.amazonaws.com"
+  endpoint: ""
+  # empty for S3 compatible storage without a region
+  region: ""
+  # "true" to skip TLS certificate verification (self-signed / private CA)
+  skipSSLVerify: ""
+  # extra free-form keys added to stringData
+  extra: {}
+  # extra:
+  #   mounter: rclone
+
+# ---------------------------------------------------------------------
+# Storage classes
+#
+# Every entry renders one StorageClass. Secret references are wired
+# automatically to secret.name / secretNamespace.
+# ---------------------------------------------------------------------
+storageClasses:
+  - name: csi-s3
+    enabled: true
+    mounter: rclone
+    reclaimPolicy: Delete
+    volumeBindingMode: Immediate
+    allowVolumeExpansion: false
+    # empty bucket/prefix means: one bucket per volume, root of the bucket
+    bucket: ""
+    prefix: ""
+    # set true to keep volumes in a sub-folder of one bucket instead of
+    # one bucket per volume when only prefix is given
+    usePrefix: null
+    secretNamespace: kube-system
+    annotations: {}
+    extraParameters: {}
+
+  # block-backed volumes (real XFS on top of s3backer) for databases and
+  # other POSIX-heavy workloads; needs a -full driver image and
+  # driver.csiDriverObject.fsGroupPolicy=File
+  - name: csi-s3-block
+    enabled: false
+    mounter: s3backer
+    reclaimPolicy: Delete
+    volumeBindingMode: Immediate
+    allowVolumeExpansion: false
+    bucket: ""
+    prefix: ""
+    usePrefix: null
+    secretNamespace: kube-system
+    annotations: {}
+    extraParameters: {}
+
+# ---------------------------------------------------------------------
+# Tests / examples
+# ---------------------------------------------------------------------
+tests:
+  # renders templates/tests/test-pvc-pod.yaml as a helm test pod
+  enabled: false
+  storageClassName: csi-s3
+  size: 5Gi
+  image:
+    repository: nginx
+    tag: latest
