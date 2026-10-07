@@ -7,6 +7,8 @@ This fork adds:
 * `skipSSLVerify` secret option to disable TLS certificate verification (self-signed / private CA endpoints), applied to the S3 API client and to all four mounters
 * Multi-segment bucket prefixes (e.g. `team/data/vol-1`) work correctly with `usePrefix: "true"`
 * rclone uses path-style addressing (`--s3-provider=Other`) for endpoints without a region, instead of AWS virtual-host addressing which does not resolve for S3 compatible endpoints
+* `bucket` + `prefix` without `usePrefix` gives every volume its own folder `<prefix>/<volume-id>` under a common prefix root, instead of one shared bucket
+* s3backer block volumes work from a container: loop device nodes are pre-created and a stale `already mounted` token from a crashed driver is reset automatically; a `CSIDriver` object with `fsGroupPolicy: File` is provided so `fsGroup` ownership applies
 * Images buildable again: the buster base images now use `archive.debian.org`, dependencies resolve from `go.sum` instead of `go get`
 
 ## Status
@@ -18,8 +20,7 @@ This is still very experimental and should not be used in any production environ
 Prebuilt images for this fork are pushed to Docker Hub:
 
 ```
-sothanav/csi-s3:v1.2.0-rc.2-skipssl3        # rclone, s3fs, goofys
-sothanav/csi-s3:v1.2.0-rc.2-skipssl3-full   # additional s3backer
+sothanav/csi-s3:v1.2.0-rc.2-skipssl6        # full variant: rclone, s3fs, goofys, s3backer
 ```
 
 To build your own:
@@ -258,6 +259,12 @@ All mounters have different strengths and weaknesses depending on your use case.
 
 *s3backer is experimental at this point because volume corruption can occur pretty quickly in case of an unexpected shutdown of a Kubernetes node or CSI pod.
 The s3backer binary is not bundled with the normal docker image to keep that as small as possible. Use the `<version>-full` image tag for testing s3backer.
+
+Notes for using the s3backer mounter (see `deploy/kubernetes/examples/storageclass-s3backer.yaml`):
+
+* Deploy `deploy/kubernetes/csi-driver.yaml` (a `CSIDriver` object with `fsGroupPolicy: File`). Without it kubelet never applies the pod's `fsGroup` to volumes of this driver and non-root workloads — postgres being the classic case — fail on the XFS root ownership.
+* The driver pre-creates `/dev/loop0..63` device nodes because loop-control may hand out any free loop number while a privileged container only sees the nodes host udev has already created.
+* If the driver pod dies while a volume is staged, s3backer's `already mounted` token is left behind in the bucket. The driver now detects this, resets the token and retries the mount.
 
 Fore more detailed limitations consult the documentation of the different projects.
 
