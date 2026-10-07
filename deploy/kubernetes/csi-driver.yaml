@@ -1,0 +1,9 @@
+kind: CSIDriver
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: ch.ctrox.csi.s3-driver
+spec:
+  # without this object kubelet never applies pod fsGroup to volumes of this
+  # driver; File makes it chown the mounted volume, which the block mounter
+  # (real XFS) needs for workloads running as non-root (e.g. postgres)
+  fsGroupPolicy: File
