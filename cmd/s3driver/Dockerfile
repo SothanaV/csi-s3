@@ -3,15 +3,21 @@ FROM golang:1.16-alpine as gobuild
 WORKDIR /build
 ADD . /build
 
-RUN go get -d -v ./...
+# go get would upgrade to latest (incl. retracted) versions, resolve from go.sum instead
+RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-extldflags "-static"' -o ./s3driver ./cmd/s3driver
 
 FROM debian:buster-slim
 LABEL maintainers="Cyrill Troxler <cyrilltroxler@gmail.com>"
 LABEL description="csi-s3 slim image"
 
+# buster is EOL, its packages now live on archive.debian.org
+RUN sed -i -e 's|deb.debian.org|archive.debian.org|g' \
+  -e 's|security.debian.org|archive.debian.org|g' \
+  -e '/buster-updates/d' /etc/apt/sources.list
+
 # s3fs and some other dependencies
-RUN apt-get update && \
+RUN apt-get update -o Acquire::Check-Valid-Until=false && \
   apt-get install -y \
   s3fs curl unzip && \
   rm -rf /var/lib/apt/lists/*

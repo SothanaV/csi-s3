@@ -10,3 +10,6 @@
 /Godeps/_workspace
 vendor
 vendor.*
+
+# local environment file with credentials
+env

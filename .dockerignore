@@ -1,0 +1,12 @@
+.git
+.github
+env
+_output
+*.test
+deploy
+test
+README.md
+LICENSE
+.gitlab-ci.yml
+.gitignore
+.dockerignore
