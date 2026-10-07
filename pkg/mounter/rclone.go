@@ -43,12 +43,20 @@ func (rclone *rcloneMounter) Unstage(stageTarget string) error {
 }
 
 func (rclone *rcloneMounter) Mount(source string, target string) error {
+	// the AWS provider always uses virtual host addressing
+	// (bucket.subdomain), which S3 compatible endpoints with a path
+	// based endpoint URL do not resolve. Only use it when a region
+	// is set, i.e. when actually talking to AWS
+	provider := "Other"
+	if rclone.region != "" {
+		provider = "AWS"
+	}
 	args := []string{
 		"mount",
 		fmt.Sprintf(":s3:%s", path.Join(rclone.meta.BucketName, rclone.meta.Prefix, rclone.meta.FSPath)),
 		fmt.Sprintf("%s", target),
 		"--daemon",
-		"--s3-provider=AWS",
+		fmt.Sprintf("--s3-provider=%s", provider),
 		"--s3-env-auth=true",
 		fmt.Sprintf("--s3-region=%s", rclone.region),
 		fmt.Sprintf("--s3-endpoint=%s", rclone.url),
