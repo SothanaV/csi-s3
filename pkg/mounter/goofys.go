@@ -1,13 +1,16 @@
 package mounter
 
 import (
+	"crypto/tls"
 	"fmt"
 	"os"
 	"path"
+	"strings"
 
 	"context"
 
 	"github.com/ctrox/csi-s3/pkg/s3"
+	"github.com/golang/glog"
 	goofysApi "github.com/kahing/goofys/api"
 	"github.com/kahing/goofys/api/common"
 )
@@ -24,6 +27,7 @@ type goofysMounter struct {
 	region          string
 	accessKeyID     string
 	secretAccessKey string
+	skipSSLVerify   bool
 }
 
 func newGoofysMounter(meta *s3.FSMeta, cfg *s3.Config) (Mounter, error) {
@@ -50,6 +54,13 @@ func (goofys *goofysMounter) Unstage(stageTarget string) error {
 }
 
 func (goofys *goofysMounter) Mount(source string, target string) error {
+	if goofys.skipSSLVerify && strings.HasPrefix(goofys.endpoint, "https") {
+		// goofys uses the shared transport from its api/common package,
+		// it has no per mount option for this
+		glog.Warningf("goofys: skipping TLS certificate verification for %s (applies to all goofys mounts in this process)", goofys.endpoint)
+		common.GetHTTPTransport().TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
+
 	goofysCfg := &common.FlagStorage{
 		MountPoint: target,
 		Endpoint:   goofys.endpoint,

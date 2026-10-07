@@ -6,6 +6,7 @@ import (
 	"path"
 
 	"github.com/ctrox/csi-s3/pkg/s3"
+	"github.com/golang/glog"
 )
 
 // Implements Mounter
@@ -15,6 +16,7 @@ type rcloneMounter struct {
 	region          string
 	accessKeyID     string
 	secretAccessKey string
+	skipSSLVerify   bool
 }
 
 const (
@@ -28,6 +30,7 @@ func newRcloneMounter(meta *s3.FSMeta, cfg *s3.Config) (Mounter, error) {
 		region:          cfg.Region,
 		accessKeyID:     cfg.AccessKeyID,
 		secretAccessKey: cfg.SecretAccessKey,
+		skipSSLVerify:   cfg.SkipSSLVerify,
 	}, nil
 }
 
@@ -52,6 +55,10 @@ func (rclone *rcloneMounter) Mount(source string, target string) error {
 		"--allow-other",
 		// TODO: make this configurable
 		"--vfs-cache-mode=writes",
+	}
+	if rclone.skipSSLVerify {
+		glog.Warningf("rclone: skipping TLS certificate verification for %s", rclone.url)
+		args = append(args, "--no-check-certificate")
 	}
 	os.Setenv("AWS_ACCESS_KEY_ID", rclone.accessKeyID)
 	os.Setenv("AWS_SECRET_ACCESS_KEY", rclone.secretAccessKey)

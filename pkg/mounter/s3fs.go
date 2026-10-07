@@ -6,6 +6,7 @@ import (
 	"path"
 
 	"github.com/ctrox/csi-s3/pkg/s3"
+	"github.com/golang/glog"
 )
 
 // Implements Mounter
@@ -14,6 +15,7 @@ type s3fsMounter struct {
 	url           string
 	region        string
 	pwFileContent string
+	skipSSLVerify bool
 }
 
 const (
@@ -26,6 +28,7 @@ func newS3fsMounter(meta *s3.FSMeta, cfg *s3.Config) (Mounter, error) {
 		url:           cfg.Endpoint,
 		region:        cfg.Region,
 		pwFileContent: cfg.AccessKeyID + ":" + cfg.SecretAccessKey,
+		skipSSLVerify: cfg.SkipSSLVerify,
 	}, nil
 }
 
@@ -49,6 +52,10 @@ func (s3fs *s3fsMounter) Mount(source string, target string) error {
 		"-o", fmt.Sprintf("endpoint=%s", s3fs.region),
 		"-o", "allow_other",
 		"-o", "mp_umask=000",
+	}
+	if s3fs.skipSSLVerify {
+		glog.Warningf("s3fs: skipping TLS certificate verification for %s", s3fs.url)
+		args = append(args, "-o", "no_check_certificate")
 	}
 	return fuseMount(target, s3fsCmd, args)
 }

@@ -22,6 +22,7 @@ type s3backerMounter struct {
 	accessKeyID     string
 	secretAccessKey string
 	ssl             bool
+	skipSSLVerify   bool
 }
 
 const (
@@ -52,6 +53,7 @@ func newS3backerMounter(meta *s3.FSMeta, cfg *s3.Config) (Mounter, error) {
 		accessKeyID:     cfg.AccessKeyID,
 		secretAccessKey: cfg.SecretAccessKey,
 		ssl:             url.Scheme == "https",
+		skipSSLVerify:   cfg.SkipSSLVerify,
 	}
 
 	return s3backer, s3backer.writePasswd()
@@ -114,6 +116,10 @@ func (s3backer *s3backerMounter) mountInit(p string) error {
 	}
 	if s3backer.ssl {
 		args = append(args, "--ssl")
+		if s3backer.skipSSLVerify {
+			glog.Warningf("s3backer: skipping TLS certificate verification for %s", s3backer.url)
+			args = append(args, "--insecure")
+		}
 	}
 
 	return fuseMount(p, s3backerCmd, args)

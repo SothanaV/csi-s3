@@ -3,6 +3,7 @@ package s3
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/golang/glog"
@@ -11,6 +12,7 @@ import (
 	"io"
 	"net/url"
 	"path"
+	"strconv"
 )
 
 const (
@@ -30,6 +32,10 @@ type Config struct {
 	Region          string
 	Endpoint        string
 	Mounter         string
+	// SkipSSLVerify disables the verification of the server certificate
+	// for HTTPS endpoints. It is not part of the volume metadata and has
+	// to be set via the secret used by the provisioner and the node.
+	SkipSSLVerify bool
 }
 
 type FSMeta struct {
@@ -54,10 +60,22 @@ func NewClient(cfg *Config) (*s3Client, error) {
 	if u.Port() != "" {
 		endpoint = u.Hostname() + ":" + u.Port()
 	}
-	minioClient, err := minio.New(endpoint, &minio.Options{
+	opts := &minio.Options{
 		Creds:  credentials.NewStaticV4(client.Config.AccessKeyID, client.Config.SecretAccessKey, client.Config.Region),
 		Secure: ssl,
-	})
+	}
+	if client.Config.SkipSSLVerify && ssl {
+		transport, err := minio.DefaultTransport(ssl)
+		if err != nil {
+			return nil, err
+		}
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{}
+		}
+		transport.TLSClientConfig.InsecureSkipVerify = true
+		opts.Transport = transport
+	}
+	minioClient, err := minio.New(endpoint, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -67,13 +85,18 @@ func NewClient(cfg *Config) (*s3Client, error) {
 }
 
 func NewClientFromSecret(secret map[string]string) (*s3Client, error) {
+	skipSSLVerify, err := strconv.ParseBool(secret["skipSSLVerify"])
+	if err != nil && secret["skipSSLVerify"] != "" {
+		return nil, fmt.Errorf("failed to parse skipSSLVerify: %s", err)
+	}
 	return NewClient(&Config{
 		AccessKeyID:     secret["accessKeyID"],
 		SecretAccessKey: secret["secretAccessKey"],
 		Region:          secret["region"],
 		Endpoint:        secret["endpoint"],
 		// Mounter is set in the volume preferences, not secrets
-		Mounter: "",
+		Mounter:       "",
+		SkipSSLVerify: skipSSLVerify,
 	})
 }
 
