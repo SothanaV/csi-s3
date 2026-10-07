@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"strings"
 
 	osexec "os/exec"
 
@@ -34,7 +35,25 @@ const (
 	s3backerDefaultSize = 1024 * 1024 * 1024 // 1GiB
 	// S3backerLoopDevice the loop device required by s3backer
 	S3backerLoopDevice = "/dev/loop0"
+	// number of loop device nodes to create upfront, the kernel may
+	// assign any free device to the mount via loop-control
+	s3backerLoopDevices = 64
 )
+
+// ensureLoopDevices creates /dev/loopN block device nodes for the first
+// s3backerLoopDevices devices. Inside a container only the nodes already
+// created by the host udev exist, while losetup may request any free
+// device from loop-control, which then fails with ENOENT.
+func ensureLoopDevices() {
+	for i := 0; i < s3backerLoopDevices; i++ {
+		device := fmt.Sprintf("/dev/loop%d", i)
+		if _, err := os.Stat(device); os.IsNotExist(err) {
+			if out, err := osexec.Command("mknod", device, "b", "7", fmt.Sprintf("%d", i)).CombinedOutput(); err != nil {
+				glog.V(4).Infof("could not create loop device %s: %s", device, out)
+			}
+		}
+	}
+}
 
 func newS3backerMounter(meta *s3.FSMeta, cfg *s3.Config) (Mounter, error) {
 	url, err := url.Parse(cfg.Endpoint)
@@ -64,7 +83,8 @@ func (s3backer *s3backerMounter) String() string {
 }
 
 func (s3backer *s3backerMounter) Stage(stageTarget string) error {
-	// s3backer uses the loop device
+	// s3backer uses loop devices
+	ensureLoopDevices()
 	if err := createLoopDevice(S3backerLoopDevice); err != nil {
 		return err
 	}
@@ -87,6 +107,8 @@ func (s3backer *s3backerMounter) Unstage(stageTarget string) error {
 }
 
 func (s3backer *s3backerMounter) Mount(source string, target string) error {
+	// the loop device for the actual mount is only assigned now
+	ensureLoopDevices()
 	device := path.Join(source, s3backerDevice)
 	// second mount will mount the 'file' as a filesystem
 	err := mount.New("").Mount(device, target, s3backerFsType, []string{})
@@ -98,6 +120,17 @@ func (s3backer *s3backerMounter) Mount(source string, target string) error {
 	return nil
 }
 
+// s3backer keeps an "already mounted" token in the bucket. If a previous
+// s3backer process died (e.g. the driver pod was restarted while the
+// volume was staged), the token stays set and every later mount is
+// refused until it is reset.
+func (s3backer *s3backerMounter) resetMountedFlag(args []string) error {
+	resetArgs := append([]string{"--reset-mounted-flag"}, args...)
+	out, err := osexec.Command(s3backerCmd, resetArgs...).CombinedOutput()
+	glog.V(4).Infof("s3backer --reset-mounted-flag: %s", out)
+	return err
+}
+
 func (s3backer *s3backerMounter) mountInit(p string) error {
 	args := []string{
 		fmt.Sprintf("--blockSize=%s", s3backerBlockSize),
@@ -105,7 +138,6 @@ func (s3backer *s3backerMounter) mountInit(p string) error {
 		fmt.Sprintf("--prefix=%s/", path.Join(s3backer.meta.Prefix, s3backer.meta.FSPath)),
 		"--listBlocks",
 		s3backer.meta.BucketName,
-		p,
 	}
 	if s3backer.region != "" {
 		args = append(args, fmt.Sprintf("--region=%s", s3backer.region))
@@ -122,7 +154,19 @@ func (s3backer *s3backerMounter) mountInit(p string) error {
 		}
 	}
 
-	return fuseMount(p, s3backerCmd, args)
+	mountArgs := append(append([]string{}, args...), p)
+	out, err := runFuseCommand(s3backerCmd, mountArgs, p)
+	if err != nil && strings.Contains(string(out), "already mounted") {
+		glog.Warningf("s3backer: stale mount token on %s, resetting and retrying", s3backer)
+		if rerr := s3backer.resetMountedFlag(args); rerr != nil {
+			return fmt.Errorf("failed to reset stale s3backer mount flag: %w (mount error: %v)", rerr, err)
+		}
+		out, err = runFuseCommand(s3backerCmd, mountArgs, p)
+	}
+	if err != nil {
+		return fmt.Errorf("Error fuseMount command: %s\noutput: %s", s3backerCmd, out)
+	}
+	return nil
 }
 
 func (s3backer *s3backerMounter) writePasswd() error {

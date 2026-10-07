@@ -74,6 +74,30 @@ func fuseMount(path string, command string, args []string) error {
 	return waitForMount(path, 10*time.Second)
 }
 
+// runFuseCommand runs a fuse mount command capturing its combined output,
+// so callers can inspect it for error patterns stream-style fuseMount loses.
+// Output goes to a temp file instead of pipes: mount commands daemonize and
+// the daemon would keep pipe write ends open and block the reader
+func runFuseCommand(command string, args []string, path string) ([]byte, error) {
+	glog.V(3).Infof("Mounting fuse with command: %s and args: %s", command, args)
+	outFile, err := ioutil.TempFile("", "fusemount")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(outFile.Name())
+
+	cmd := exec.Command(command, args...)
+	cmd.Stdout = outFile
+	cmd.Stderr = outFile
+	err = cmd.Run()
+	outFile.Close()
+	out, _ := ioutil.ReadFile(outFile.Name())
+	if err != nil {
+		return out, err
+	}
+	return out, waitForMount(path, 10*time.Second)
+}
+
 func FuseUnmount(path string) error {
 	if err := mount.New("").Unmount(path); err != nil {
 		return err
