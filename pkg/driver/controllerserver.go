@@ -58,6 +58,12 @@ func (cs *controllerServer) CreateVolume(ctx context.Context, req *csi.CreateVol
 	if nameOverride, ok := params[mounter.BucketKey]; ok {
 		bucketName = nameOverride
 		prefix = volumeID
+		// without usePrefix each volume gets its own folder; the
+		// prefix parameter then acts as the root directory under
+		// which the per volume folders are created
+		if rootPrefix, ok := params[mounter.VolumePrefix]; ok && rootPrefix != "" && !usePrefix {
+			prefix = path.Join(rootPrefix, volumeID)
+		}
 		volumeID = path.Join(bucketName, prefix)
 	}
 
